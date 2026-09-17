@@ -1,0 +1,12 @@
+[
+  {
+    "nombre": "Cliente de ejemplo 1",
+    "direccion": "Av. Siempre Viva 123",
+    "telefono": "011-1234-5678"
+  },
+  {
+    "nombre": "Cliente de ejemplo 2",
+    "direccion": "Ruta 8 km 45",
+    "telefono": "011-8765-4321"
+  }
+]
