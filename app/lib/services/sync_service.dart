@@ -128,33 +128,56 @@ class SyncService {
   /// pedido original (confirmado a mano con curl: el POST ya deja la fila
   /// escrita en la planilla). La respuesta es un 302 hacia una URL de
   /// `googleusercontent.com` que unicamente sirve para LEER el resultado ya
-  /// calculado — no vuelve a ejecutar nada — y por eso solo acepta GET
-  /// (un POST ahi devuelve 405). Seguimos la redireccion a mano con GET
-  /// para no depender de que el cliente HTTP la siga bien por su cuenta.
+  /// calculado — no vuelve a ejecutar nada — y por eso solo acepta GET (un
+  /// POST ahi devuelve 405). El `http.post()` con auto-redirect de la
+  /// libreria tampoco sirve para esto: en una prueba tardo 33 segundos y
+  /// devolvio el 302 sin seguirlo. Por eso se sigue a mano con GET.
+  ///
+  /// Apps Script puede tardar bastante o directamente cortar la conexion
+  /// bajo pedidos seguidos (contencion del LockService del lado del
+  /// servidor). Como reenviar el mismo retiro es seguro -- el servidor lo
+  /// reconoce por id y no lo duplica -- se reintenta el pedido COMPLETO
+  /// (no solo la lectura del resultado) unas cuantas veces antes de darse
+  /// por vencido.
   Future<http.Response> _postAlWebhook(Uri url, String body) async {
-    final client = http.Client();
+    const intentosMaximos = 3;
+    Object? ultimoIntentoError;
+    for (var intento = 1; intento <= intentosMaximos; intento++) {
+      try {
+        return await _unIntentoDePostAlWebhook(url, body);
+      } catch (error) {
+        ultimoIntentoError = error;
+        if (intento < intentosMaximos) {
+          await Future.delayed(Duration(seconds: intento * 2));
+        }
+      }
+    }
+    throw ultimoIntentoError!;
+  }
+
+  Future<http.Response> _unIntentoDePostAlWebhook(Uri url, String body) async {
+    final postClient = http.Client();
+    late http.StreamedResponse streamed;
     try {
       final request = http.Request('POST', url)
         ..headers['Content-Type'] = 'application/json'
         ..body = body
         ..followRedirects = false;
-      var streamed =
-          await client.send(request).timeout(const Duration(seconds: 15));
-
-      const codigosRedireccion = {301, 302, 303, 307, 308};
-      if (codigosRedireccion.contains(streamed.statusCode)) {
-        final location = streamed.headers['location'];
-        if (location != null) {
-          streamed = await client
-              .send(http.Request('GET', Uri.parse(location)))
-              .timeout(const Duration(seconds: 15));
-        }
-      }
-
-      return http.Response.fromStream(streamed);
+      streamed =
+          await postClient.send(request).timeout(const Duration(seconds: 30));
     } finally {
-      client.close();
+      postClient.close();
     }
+
+    const codigosRedireccion = {301, 302, 303, 307, 308};
+    if (!codigosRedireccion.contains(streamed.statusCode)) {
+      return http.Response.fromStream(streamed);
+    }
+    final location = streamed.headers['location'];
+    if (location == null) {
+      return http.Response.fromStream(streamed);
+    }
+    return http.get(Uri.parse(location)).timeout(const Duration(seconds: 30));
   }
 
   bool _esRespuestaOk(http.Response response) {
