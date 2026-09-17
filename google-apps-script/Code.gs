@@ -32,24 +32,31 @@ function doGet(e) {
 
 /**
  * Prueba manual: seleccionar "pruebaManual" en el desplegable de funciones
- * de arriba del editor y apretar "Ejecutar". No depende del objeto "e" que
- * solo llega cuando lo invoca la app web, asi que sirve para probar la
- * escritura en la planilla sin pasar por la app ni por la URL publicada.
- * Despues de ejecutar, revisar "Registro de ejecucion" (Ver > Registros) o
- * el panel que aparece abajo del editor: ahi va a quedar el rastro de en
- * que paso fallo, si fallo.
+ * de arriba del editor y apretar "Ejecutar". Simula un pedido real armando
+ * a mano el objeto "e" (que normalmente solo existe cuando lo invoca la app
+ * web) y llama a doPost() directo, asi se prueba EXACTAMENTE el mismo
+ * camino que usa la app: parseo del JSON, guardado en Retiros y registro en
+ * Log — sin depender de la URL publicada ni de si quedo bien redesplegada.
+ * Despues de ejecutar, "Ver > Registros" (o el panel de abajo del editor)
+ * muestra el resultado, y debería aparecer una fila nueva en Retiros y otra
+ * en Log.
  */
 function pruebaManual() {
-  var resultado = guardarRetiro({
-    id: 'prueba-' + new Date().getTime(),
-    fecha: new Date().toISOString(),
-    chofer: 'Prueba manual',
-    generador: 'Cliente de prueba',
-    direccion: 'Direccion de prueba',
-    litros: 100,
-    importe: 5000,
-  });
-  Logger.log(JSON.stringify(resultado));
+  var e = {
+    postData: {
+      contents: JSON.stringify({
+        id: 'prueba-' + new Date().getTime(),
+        fecha: new Date().toISOString(),
+        chofer: 'Prueba manual',
+        generador: 'Cliente de prueba',
+        direccion: 'Direccion de prueba',
+        litros: 100,
+        importe: 5000,
+      }),
+    },
+  };
+  var respuesta = doPost(e);
+  Logger.log(respuesta.getContent());
 }
 
 function guardarRetiro(datos) {
