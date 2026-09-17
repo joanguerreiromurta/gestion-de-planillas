@@ -25,13 +25,41 @@ function doGet(e) {
   return respuestaJson({ status: 'ok', mensaje: 'Backend de retiros activo' });
 }
 
+/**
+ * Prueba manual: seleccionar "pruebaManual" en el desplegable de funciones
+ * de arriba del editor y apretar "Ejecutar". No depende del objeto "e" que
+ * solo llega cuando lo invoca la app web, asi que sirve para probar la
+ * escritura en la planilla sin pasar por la app ni por la URL publicada.
+ * Despues de ejecutar, revisar "Registro de ejecucion" (Ver > Registros) o
+ * el panel que aparece abajo del editor: ahi va a quedar el rastro de en
+ * que paso fallo, si fallo.
+ */
+function pruebaManual() {
+  var resultado = guardarRetiro({
+    id: 'prueba-' + new Date().getTime(),
+    fecha: new Date().toISOString(),
+    chofer: 'Prueba manual',
+    generador: 'Cliente de prueba',
+    direccion: 'Direccion de prueba',
+    litros: 100,
+    importe: 5000,
+  });
+  Logger.log(JSON.stringify(resultado));
+}
+
 function guardarRetiro(datos) {
+  Logger.log('guardarRetiro: recibido ' + JSON.stringify(datos));
+
   if (!datos.id || !datos.fecha || !datos.chofer || !datos.generador) {
+    Logger.log('guardarRetiro: faltan campos obligatorios');
     return { status: 'error', mensaje: 'Faltan campos obligatorios' };
   }
 
   var hoja = obtenerOCrearHoja();
+  Logger.log('guardarRetiro: hoja lista -> ' + hoja.getName());
+
   if (idYaExiste(hoja, datos.id)) {
+    Logger.log('guardarRetiro: id duplicado, no se agrega fila');
     return { status: 'ok', duplicado: true };
   }
 
@@ -47,6 +75,7 @@ function guardarRetiro(datos) {
     Number(datos.importe) || 0,
     new Date(),
   ]);
+  Logger.log('guardarRetiro: fila agregada en ' + hoja.getName());
 
   return { status: 'ok', duplicado: false };
 }
