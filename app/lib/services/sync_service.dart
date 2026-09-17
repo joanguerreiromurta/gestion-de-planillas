@@ -60,17 +60,17 @@ class SyncService {
       var huboError = false;
       for (final retiro in pendientes) {
         try {
-          final response = await http
-              .post(
-                Uri.parse(webhookUrl),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode(retiro.toSyncPayload()),
-              )
-              .timeout(const Duration(seconds: 15));
+          final response = await _postAlWebhook(
+            Uri.parse(webhookUrl),
+            jsonEncode(retiro.toSyncPayload()),
+          );
 
-          // El Apps Script responde "ok" tanto si guardo el retiro como si
-          // ya existia ese id (duplicado descartado del lado del servidor).
-          if (response.statusCode == 200) {
+          // No alcanza con mirar el codigo HTTP: si el deploy de Apps Script
+          // no tiene acceso "Cualquier usuario", Google redirige a un login
+          // que tambien responde 200 (HTML, no JSON). Solo se considera
+          // sincronizado si el cuerpo es el JSON {"status":"ok"} esperado.
+          final sincronizadoOk = _esRespuestaOk(response);
+          if (sincronizadoOk) {
             await AppDatabase.instance.marcarSincronizado(retiro.id);
           } else {
             huboError = true;
@@ -86,6 +86,55 @@ class SyncService {
       _controller.add(huboError ? SyncStatus.error : SyncStatus.alDia);
     } finally {
       _sincronizando = false;
+    }
+  }
+
+  /// Las URLs `/exec` de Apps Script responden con un 302 hacia una URL de
+  /// `googleusercontent.com` antes de ejecutar el script. El cliente HTTP de
+  /// Flutter sigue esa redireccion pero, como cualquier cliente que respeta
+  /// el comportamiento historico de los navegadores, convierte el POST en
+  /// GET al hacerlo (y pierde el cuerpo) — por eso al servidor le llegaba un
+  /// doGet en vez de un doPost. Acá seguimos la redireccion a mano,
+  /// reenviando el mismo POST con el mismo cuerpo.
+  Future<http.Response> _postAlWebhook(Uri url, String body) async {
+    final client = http.Client();
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      var request = http.Request('POST', url)
+        ..headers.addAll(headers)
+        ..body = body
+        ..followRedirects = false;
+      var streamed =
+          await client.send(request).timeout(const Duration(seconds: 15));
+
+      const codigosRedireccion = {301, 302, 303, 307, 308};
+      if (codigosRedireccion.contains(streamed.statusCode)) {
+        final location = streamed.headers['location'];
+        if (location != null) {
+          final redirectRequest = http.Request('POST', Uri.parse(location))
+            ..headers.addAll(headers)
+            ..body = body;
+          streamed = await client
+              .send(redirectRequest)
+              .timeout(const Duration(seconds: 15));
+        }
+      }
+
+      return http.Response.fromStream(streamed);
+    } finally {
+      client.close();
+    }
+  }
+
+  bool _esRespuestaOk(http.Response response) {
+    if (response.statusCode != 200) return false;
+    try {
+      final body = jsonDecode(response.body);
+      return body is Map && body['status'] == 'ok';
+    } catch (_) {
+      // No era JSON: probablemente una pagina de login de Google, no la
+      // respuesta del script (deploy con acceso mal configurado).
+      return false;
     }
   }
 }
