@@ -24,6 +24,7 @@ class SyncService {
   Stream<SyncStatus> get status => _controller.stream;
 
   bool _sincronizando = false;
+  bool _reintentarAlTerminar = false;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   void iniciarEscuchaDeConexion() {
@@ -40,53 +41,68 @@ class SyncService {
     _connectivitySub = null;
   }
 
+  /// Si ya hay una sincronizacion en curso (por ejemplo, la del retiro
+  /// anterior todavia no termino de viajar por la red) esta llamada no se
+  /// pierde: queda anotada y dispara una pasada mas apenas termina la que
+  /// esta corriendo, para no dejar afuera al retiro que la origino.
   Future<void> sincronizarPendientes() async {
-    if (_sincronizando) return;
+    if (_sincronizando) {
+      _reintentarAlTerminar = true;
+      return;
+    }
     _sincronizando = true;
-    _controller.add(SyncStatus.sincronizando);
     try {
-      final webhookUrl = await ConfigService.instance.getWebhookUrl();
-      if (webhookUrl == null || webhookUrl.isEmpty) {
-        _controller.add(SyncStatus.sinConfigurar);
-        return;
-      }
-
-      final pendientes = await AppDatabase.instance.retirosPendientes();
-      if (pendientes.isEmpty) {
-        _controller.add(SyncStatus.alDia);
-        return;
-      }
-
-      var huboError = false;
-      for (final retiro in pendientes) {
-        try {
-          final response = await _postAlWebhook(
-            Uri.parse(webhookUrl),
-            jsonEncode(retiro.toSyncPayload()),
-          );
-
-          // No alcanza con mirar el codigo HTTP: si el deploy de Apps Script
-          // no tiene acceso "Cualquier usuario", Google redirige a un login
-          // que tambien responde 200 (HTML, no JSON). Solo se considera
-          // sincronizado si el cuerpo es el JSON {"status":"ok"} esperado.
-          final sincronizadoOk = _esRespuestaOk(response);
-          if (sincronizadoOk) {
-            await AppDatabase.instance.marcarSincronizado(retiro.id);
-          } else {
-            huboError = true;
-          }
-        } catch (_) {
-          huboError = true;
-          // Se corta el lote: probablemente se perdio la conexion de nuevo,
-          // se reintenta en la proxima corrida.
-          break;
-        }
-      }
-
-      _controller.add(huboError ? SyncStatus.error : SyncStatus.alDia);
+      do {
+        _reintentarAlTerminar = false;
+        await _sincronizarUnaPasada();
+      } while (_reintentarAlTerminar);
     } finally {
       _sincronizando = false;
     }
+  }
+
+  Future<void> _sincronizarUnaPasada() async {
+    _controller.add(SyncStatus.sincronizando);
+
+    final webhookUrl = await ConfigService.instance.getWebhookUrl();
+    if (webhookUrl == null || webhookUrl.isEmpty) {
+      _controller.add(SyncStatus.sinConfigurar);
+      return;
+    }
+
+    final pendientes = await AppDatabase.instance.retirosPendientes();
+    if (pendientes.isEmpty) {
+      _controller.add(SyncStatus.alDia);
+      return;
+    }
+
+    var huboError = false;
+    for (final retiro in pendientes) {
+      try {
+        final response = await _postAlWebhook(
+          Uri.parse(webhookUrl),
+          jsonEncode(retiro.toSyncPayload()),
+        );
+
+        // No alcanza con mirar el codigo HTTP: si el deploy de Apps Script
+        // no tiene acceso "Cualquier usuario", Google redirige a un login
+        // que tambien responde 200 (HTML, no JSON). Solo se considera
+        // sincronizado si el cuerpo es el JSON {"status":"ok"} esperado.
+        final sincronizadoOk = _esRespuestaOk(response);
+        if (sincronizadoOk) {
+          await AppDatabase.instance.marcarSincronizado(retiro.id);
+        } else {
+          huboError = true;
+        }
+      } catch (_) {
+        huboError = true;
+        // Se corta el lote: probablemente se perdio la conexion de nuevo,
+        // se reintenta en la proxima corrida.
+        break;
+      }
+    }
+
+    _controller.add(huboError ? SyncStatus.error : SyncStatus.alDia);
   }
 
   /// Las URLs `/exec` de Apps Script responden con un 302 hacia una URL de
