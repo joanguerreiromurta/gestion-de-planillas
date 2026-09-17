@@ -27,6 +27,10 @@ class SyncService {
   bool _reintentarAlTerminar = false;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
+  /// Detalle del ultimo problema encontrado, para mostrar en la app sin
+  /// depender de revisar la planilla o el editor de Apps Script.
+  String? ultimoError;
+
   void iniciarEscuchaDeConexion() {
     _connectivitySub ??= Connectivity()
         .onConnectivityChanged
@@ -78,27 +82,42 @@ class SyncService {
 
     var huboError = false;
     for (final retiro in pendientes) {
+      http.Response response;
       try {
-        final response = await _postAlWebhook(
+        response = await _postAlWebhook(
           Uri.parse(webhookUrl),
           jsonEncode(retiro.toSyncPayload()),
         );
-
-        // No alcanza con mirar el codigo HTTP: si el deploy de Apps Script
-        // no tiene acceso "Cualquier usuario", Google redirige a un login
-        // que tambien responde 200 (HTML, no JSON). Solo se considera
-        // sincronizado si el cuerpo es el JSON {"status":"ok"} esperado.
-        final sincronizadoOk = _esRespuestaOk(response);
-        if (sincronizadoOk) {
-          await AppDatabase.instance.marcarSincronizado(retiro.id);
-        } else {
-          huboError = true;
-        }
-      } catch (_) {
+      } catch (error) {
+        // Fallo de red (se corto la conexion, timeout, etc.): no tiene
+        // sentido insistir con el resto de la lista en esta pasada, se
+        // reintenta todo en la proxima.
         huboError = true;
-        // Se corta el lote: probablemente se perdio la conexion de nuevo,
-        // se reintenta en la proxima corrida.
+        ultimoError = 'Envio de ${retiro.id}: $error';
         break;
+      }
+
+      // No alcanza con mirar el codigo HTTP: si el deploy de Apps Script no
+      // tiene acceso "Cualquier usuario", Google redirige a un login que
+      // tambien responde 200 (HTML, no JSON). Solo se considera
+      // sincronizado si el cuerpo es el JSON {"status":"ok"} esperado.
+      if (!_esRespuestaOk(response)) {
+        huboError = true;
+        ultimoError =
+            'Respuesta inesperada (${response.statusCode}) para ${retiro.id}';
+        // Este retiro sigue pendiente, pero no bloquea a los siguientes.
+        continue;
+      }
+
+      try {
+        await AppDatabase.instance.marcarSincronizado(retiro.id);
+      } catch (error) {
+        // El servidor ya confirmo el retiro (esta bien en la planilla); si
+        // falla marcarlo sincronizado en el celular no hay que perder por
+        // eso a los demas retiros de la pasada. Se va a reintentar solo,
+        // y el servidor lo va a reconocer como duplicado sin problema.
+        huboError = true;
+        ultimoError = 'No se pudo marcar ${retiro.id} como sincronizado: $error';
       }
     }
 

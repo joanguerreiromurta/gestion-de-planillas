@@ -221,9 +221,13 @@ class _SyncBadge extends StatelessWidget {
       SyncStatus.error => (
           Icons.cloud_off,
           Colors.amber,
-          pendientes == 1
-              ? '1 retiro sin sincronizar, se reintentara'
-              : '$pendientes retiros sin sincronizar, se reintentara'
+          [
+            pendientes == 1
+                ? '1 retiro sin sincronizar, se reintentara'
+                : '$pendientes retiros sin sincronizar, se reintentara',
+            if (SyncService.instance.ultimoError != null)
+              SyncService.instance.ultimoError!,
+          ].join('\n'),
         ),
       SyncStatus.sinConfigurar => (
           Icons.warning_amber,
@@ -232,10 +236,17 @@ class _SyncBadge extends StatelessWidget {
         ),
     };
     return Padding(
-      padding: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.only(right: 4),
       child: Tooltip(
         message: tooltip,
-        child: Icon(icon, color: color),
+        child: IconButton(
+          icon: Icon(icon, color: color),
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(tooltip)),
+            );
+          },
+        ),
       ),
     );
   }
