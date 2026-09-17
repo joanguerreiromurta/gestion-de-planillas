@@ -30,7 +30,12 @@ class _HomeScreenState extends State<HomeScreen> {
     SyncService.instance.status.listen((status) {
       if (!mounted) return;
       setState(() => _syncStatus = status);
-      if (status == SyncStatus.alDia) _cargarRetirosHoy();
+      // Se recarga la lista tanto si termino bien como si quedo algo
+      // pendiente: aunque el resultado global sea "error", puede haber
+      // otros retiros que sí se hayan sincronizado y hay que reflejarlo.
+      if (status == SyncStatus.alDia || status == SyncStatus.error) {
+        _cargarRetirosHoy();
+      }
     });
     _cargarRetirosHoy();
     SyncService.instance.sincronizarPendientes();
@@ -57,7 +62,10 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Retiros de hoy'),
         actions: [
-          _SyncBadge(status: _syncStatus),
+          _SyncBadge(
+            status: _syncStatus,
+            pendientes: _retirosHoy.where((r) => !r.sincronizado).length,
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Configuracion',
@@ -190,13 +198,20 @@ class _Metrica extends StatelessWidget {
 }
 
 class _SyncBadge extends StatelessWidget {
-  const _SyncBadge({required this.status});
+  const _SyncBadge({required this.status, required this.pendientes});
 
   final SyncStatus status;
+  final int pendientes;
 
   @override
   Widget build(BuildContext context) {
-    final (icon, color, tooltip) = switch (status) {
+    // "error" con 0 pendientes reales (ya se resolvieron solos en un
+    // reintento posterior) se muestra igual que "al dia", para no dejar
+    // una nube naranja pegada sin que haya nada realmente atascado.
+    final estadoEfectivo =
+        status == SyncStatus.error && pendientes == 0 ? SyncStatus.alDia : status;
+
+    final (icon, color, tooltip) = switch (estadoEfectivo) {
       SyncStatus.sincronizando => (
           Icons.sync,
           Colors.white,
@@ -206,7 +221,9 @@ class _SyncBadge extends StatelessWidget {
       SyncStatus.error => (
           Icons.cloud_off,
           Colors.amber,
-          'Sin conexion, se reintentara'
+          pendientes == 1
+              ? '1 retiro sin sincronizar, se reintentara'
+              : '$pendientes retiros sin sincronizar, se reintentara'
         ),
       SyncStatus.sinConfigurar => (
           Icons.warning_amber,
