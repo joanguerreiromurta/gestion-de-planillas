@@ -23,6 +23,20 @@
 8. Copiar la **URL de la aplicación web** (`.../exec`) — esa es la URL que se
    carga en la pantalla de configuración de la app del chofer.
 
+### ⚠️ Actualizar el script cuando cambia el código
+
+Pegar el código nuevo en `Código.gs` y guardar **no alcanza**. La URL `/exec`
+publicada sigue sirviendo una foto fija del código tal como estaba en el
+momento del último deploy, aunque el archivo se haya editado después.
+Cada vez que se actualiza `Code.gs` hay que:
+
+1. `Implementar → Gestionar implementaciones`.
+2. Ícono de lápiz (editar) sobre la implementación activa.
+3. En "Versión", elegir **Nueva versión**.
+4. `Implementar`.
+
+La URL `/exec` no cambia, así que no hace falta tocar nada en la app.
+
 ## 3. Estructura de la hoja `Retiros`
 
 | Columna | Contenido |
@@ -40,6 +54,11 @@
 Esta hoja es de solo lectura desde la app: la administración puede filtrar,
 ordenar o exportar a Excel (`Archivo → Descargar → Microsoft Excel`), pero no
 hace falta tocarla a mano.
+
+El script también crea sola una hoja **`Log`**, con una fila por cada pedido
+que recibe (llegue bien o no): fecha/hora, el cuerpo recibido tal cual, y el
+resultado (`ok`, `duplicado` o `error` + motivo). Sirve para diagnosticar sin
+tener que entrar al panel de Ejecuciones de Apps Script.
 
 ## 4. Hoja de totales (opcional, se arma una sola vez)
 

@@ -5,20 +5,25 @@
  */
 
 var HOJA_RETIROS = 'Retiros';
+var HOJA_LOG = 'Log';
 var COLUMNAS = ['ID', 'Fecha', 'Hora', 'Chofer', 'Generador', 'Direccion', 'Litros', 'Importe', 'Recibido'];
 
 function doPost(e) {
+  var resultado;
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
   try {
-    var datos = JSON.parse(e.postData.contents);
-    var resultado = guardarRetiro(datos);
-    return respuestaJson(resultado);
+    lock.waitLock(30000);
+    try {
+      var datos = JSON.parse(e.postData.contents);
+      resultado = guardarRetiro(datos);
+    } finally {
+      lock.releaseLock();
+    }
   } catch (error) {
-    return respuestaJson({ status: 'error', mensaje: String(error) });
-  } finally {
-    lock.releaseLock();
+    resultado = { status: 'error', mensaje: String(error) };
   }
+  registrarLog(e, resultado);
+  return respuestaJson(resultado);
 }
 
 function doGet(e) {
@@ -101,6 +106,31 @@ function obtenerOCrearHoja() {
     hoja.setFrozenRows(1);
   }
   return hoja;
+}
+
+/**
+ * Deja un rastro de cada pedido en una hoja "Log" de la misma planilla,
+ * para poder diagnosticar sin depender del panel de Ejecuciones de Apps
+ * Script. Si el log en si falla, no debe tumbar la respuesta real.
+ */
+function registrarLog(e, resultado) {
+  try {
+    var libro = SpreadsheetApp.getActiveSpreadsheet();
+    var hoja = libro.getSheetByName(HOJA_LOG);
+    if (!hoja) {
+      hoja = libro.insertSheet(HOJA_LOG);
+      hoja.appendRow(['Fecha/Hora', 'Cuerpo recibido', 'Resultado']);
+      hoja.setFrozenRows(1);
+    }
+    var cuerpo =
+      e && e.postData && e.postData.contents
+        ? e.postData.contents
+        : '(sin cuerpo)';
+    hoja.appendRow([new Date(), cuerpo, JSON.stringify(resultado)]);
+  } catch (errorDeLog) {
+    // Se ignora a proposito: un fallo al loguear no debe afectar la
+    // respuesta que recibe la app.
+  }
 }
 
 function respuestaJson(objeto) {
