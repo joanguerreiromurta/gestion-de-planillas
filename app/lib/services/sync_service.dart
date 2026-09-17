@@ -105,19 +105,18 @@ class SyncService {
     _controller.add(huboError ? SyncStatus.error : SyncStatus.alDia);
   }
 
-  /// Las URLs `/exec` de Apps Script responden con un 302 hacia una URL de
-  /// `googleusercontent.com` antes de ejecutar el script. El cliente HTTP de
-  /// Flutter sigue esa redireccion pero, como cualquier cliente que respeta
-  /// el comportamiento historico de los navegadores, convierte el POST en
-  /// GET al hacerlo (y pierde el cuerpo) — por eso al servidor le llegaba un
-  /// doGet en vez de un doPost. Acá seguimos la redireccion a mano,
-  /// reenviando el mismo POST con el mismo cuerpo.
+  /// Las URLs `/exec` de Apps Script ejecutan doPost() ahi mismo, con el
+  /// pedido original (confirmado a mano con curl: el POST ya deja la fila
+  /// escrita en la planilla). La respuesta es un 302 hacia una URL de
+  /// `googleusercontent.com` que unicamente sirve para LEER el resultado ya
+  /// calculado — no vuelve a ejecutar nada — y por eso solo acepta GET
+  /// (un POST ahi devuelve 405). Seguimos la redireccion a mano con GET
+  /// para no depender de que el cliente HTTP la siga bien por su cuenta.
   Future<http.Response> _postAlWebhook(Uri url, String body) async {
     final client = http.Client();
     try {
-      final headers = {'Content-Type': 'application/json'};
-      var request = http.Request('POST', url)
-        ..headers.addAll(headers)
+      final request = http.Request('POST', url)
+        ..headers['Content-Type'] = 'application/json'
         ..body = body
         ..followRedirects = false;
       var streamed =
@@ -127,11 +126,8 @@ class SyncService {
       if (codigosRedireccion.contains(streamed.statusCode)) {
         final location = streamed.headers['location'];
         if (location != null) {
-          final redirectRequest = http.Request('POST', Uri.parse(location))
-            ..headers.addAll(headers)
-            ..body = body;
           streamed = await client
-              .send(redirectRequest)
+              .send(http.Request('GET', Uri.parse(location)))
               .timeout(const Duration(seconds: 15));
         }
       }
